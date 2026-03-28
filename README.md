@@ -1,4 +1,26 @@
 # 🎧 EDM Genre Explorer App
+
+## 📁 Repository Structure
+
+```
+EDMGenreExplorer/
+├── frontend/               # React app (visualization, UI)
+├── backend/
+│   ├── api-gateway/        # Single entry point, routes to services
+│   ├── genre-service/      # Genre graph data & relationships
+│   ├── song-service/       # Songs mapped to genres
+│   └── artist-service/     # Artists mapped to genres
+└── shared/
+    ├── types/              # Core domain types (Genre, Song, Artist…)
+    ├── contracts/          # API request/response shapes per service
+    └── index.ts            # Barrel export
+```
+
+> **The `shared/` folder is the contract layer.**
+> Any API change must be made there first so both the frontend and the backend stay in sync.
+
+---
+
 ## 📌 Feature Requirements
 
 ### 1. Core Goal
