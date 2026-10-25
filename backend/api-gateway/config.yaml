@@ -1,0 +1,24 @@
+# API Gateway configuration.
+#
+# Values support environment variable expansion:
+#   ${VAR}            → value of VAR (empty if unset)
+#   ${VAR:-default}   → value of VAR, or "default" if unset/empty
+
+server:
+  port: ${PORT:-8080}
+
+# Methods allowed when a service does not declare its own `methods` list.
+default_methods: [GET, POST, PUT, PATCH, DELETE]
+
+services:
+  - name: genre-service
+    prefix: /api/genres
+    url: ${GENRE_SERVICE_URL:-http://localhost:3001}
+
+  - name: song-service
+    prefix: /api/songs
+    url: ${SONG_SERVICE_URL:-http://localhost:3002}
+
+  - name: artist-service
+    prefix: /api/artists
+    url: ${ARTIST_SERVICE_URL:-http://localhost:3003}
