@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,24 +13,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// serviceConfig holds the upstream address for a backend service.
-type serviceConfig struct {
-	target *url.URL
-}
-
 // proxyHandler returns a Gin handler that reverse-proxies the request to
 // the given upstream target, rewriting the path so that the /api/<prefix>
 // segment is stripped before forwarding.
-func proxyHandler(cfg serviceConfig, stripPrefix string) gin.HandlerFunc {
-	proxy := httputil.NewSingleHostReverseProxy(cfg.target)
+func proxyHandler(target *url.URL, stripPrefix string) gin.HandlerFunc {
+	proxy := httputil.NewSingleHostReverseProxy(target)
 
-	// Customise the director so the upstream only sees the path after the
-	// strip prefix (e.g. /api/genres/graph → /genres/graph).
 	originalDirector := proxy.Director
 	proxy.Director = func(req *http.Request) {
 		originalDirector(req)
 		// Strip the gateway prefix so the upstream receives only its own path
-		// segment (e.g. /api/genres/graph → /genres/graph).
+		// segment (e.g. /api/genres/graph → /graph).
 		trimmed := strings.TrimPrefix(req.URL.Path, stripPrefix)
 		if trimmed == "" {
 			trimmed = "/"
@@ -51,16 +45,13 @@ func proxyHandler(cfg serviceConfig, stripPrefix string) gin.HandlerFunc {
 }
 
 func main() {
-	// Read upstream addresses from environment variables, falling back to
-	// the default ports documented in the README.
-	genreServiceURL := getEnv("GENRE_SERVICE_URL", "http://localhost:3001")
-	songServiceURL := getEnv("SONG_SERVICE_URL", "http://localhost:3002")
-	artistServiceURL := getEnv("ARTIST_SERVICE_URL", "http://localhost:3003")
-	port := getEnv("PORT", "8080")
+	configPath := flag.String("config", getEnv("GATEWAY_CONFIG", "config.yaml"), "path to the gateway YAML config")
+	flag.Parse()
 
-	genreTarget := mustParseURL(genreServiceURL)
-	songTarget := mustParseURL(songServiceURL)
-	artistTarget := mustParseURL(artistServiceURL)
+	cfg, err := LoadConfig(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
 	r := gin.Default()
 
@@ -69,32 +60,16 @@ func main() {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 
-	// Route groups: each group is proxied to its respective upstream service.
-	// Only standard RESTful HTTP methods are allowed.
-	allowedMethods := []string{
-		http.MethodGet, http.MethodPost, http.MethodPut,
-		http.MethodPatch, http.MethodDelete,
-	}
-	routes := []struct {
-		prefix  string
-		handler gin.HandlerFunc
-	}{
-		{"/api/genres/*path", proxyHandler(serviceConfig{target: genreTarget}, "/api/genres")},
-		{"/api/songs/*path", proxyHandler(serviceConfig{target: songTarget}, "/api/songs")},
-		{"/api/artists/*path", proxyHandler(serviceConfig{target: artistTarget}, "/api/artists")},
-	}
-	for _, route := range routes {
-		for _, method := range allowedMethods {
-			r.Handle(method, route.prefix, route.handler)
+	log.Printf("API Gateway listening on :%s (config: %s)", cfg.Server.Port, *configPath)
+	for _, svc := range cfg.Services {
+		handler := proxyHandler(svc.target, svc.Prefix)
+		for _, method := range svc.Methods {
+			r.Handle(method, svc.Prefix+"/*path", handler)
 		}
+		log.Printf("  %-14s → %s (%s) %v", svc.Prefix, svc.URL, svc.Name, svc.Methods)
 	}
 
-	log.Printf("API Gateway listening on :%s", port)
-	log.Printf("  /api/genres  → %s", genreServiceURL)
-	log.Printf("  /api/songs   → %s", songServiceURL)
-	log.Printf("  /api/artists → %s", artistServiceURL)
-
-	if err := r.Run(":" + port); err != nil {
+	if err := r.Run(":" + cfg.Server.Port); err != nil {
 		log.Fatalf("failed to start server: %v", err)
 	}
 }
@@ -106,13 +81,4 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// mustParseURL parses rawURL and exits if it is invalid.
-func mustParseURL(rawURL string) *url.URL {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		log.Fatalf("invalid URL %q: %v", rawURL, err)
-	}
-	return u
 }
